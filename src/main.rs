@@ -17,6 +17,7 @@ fn init() -> ! {
     let mut display_board: [[u8; 5]; 5] = [[1; 5]; 5];
     let mut display = Display::new(board.display_pins);
 
+    // makes calling button methods easier throughout the program
     let button_a = board.buttons.button_a;
     let button_b = board.buttons.button_b;
 
@@ -38,26 +39,34 @@ fn init() -> ! {
             Combined button presses: Ignored
         */
         if button_a.is_low().unwrap() && button_b.is_high().unwrap() {
-            rprintln!("Course Mode");
             mode = false;
         } else if button_b.is_low().unwrap() && button_a.is_high().unwrap() {
-            rprintln!("Fine Mode");
             mode = true;
         }
 
+        // Gets accelerometer readings from microbit
         if sensor.accel_status().unwrap().xyz_new_data {
             let data = sensor.accel_data().unwrap();
-            // RTT instead of normal print
-            rprintln!("Acceleration: x {} y {} z {}", data.x, data.y, data.z);
+            rprintln!(
+                "Acceleration: x {} y {} z {} fine {}",
+                data.x,
+                data.y,
+                data.z,
+                mode
+            );
+
+            /*
+                If board is upside down (LED matrix pointing towards the ground), screen is cleared
+                and no new pixels are displayed until the board is righted.
+
+                If the board is right side up, prior pixel is cleared and data is passed to the screen_writer
+                function, which plots the next pixel.
+            */
             if data.z > 0 {
                 screen_zero(&mut display_board);
             } else {
                 screen_zero(&mut display_board);
-                if !mode {
-                    course(&mut display_board, data.x, data.y);
-                } else {
-                    fine(&mut display_board, data.x, data.y);
-                }
+                screen_writer(&mut display_board, data.x, data.y, mode);
             }
         }
 
@@ -66,6 +75,11 @@ fn init() -> ! {
     }
 }
 
+/*
+    fn screen_zero(board_in: &mut [[u8; 5]; 5])
+
+    Turns off all the LEDs on the microbit matrix, used for clearing display between program ticks.
+*/
 fn screen_zero(board_in: &mut [[u8; 5]; 5]) {
     #[allow(clippy::needless_range_loop)]
     for i in 0..5 {
@@ -75,60 +89,53 @@ fn screen_zero(board_in: &mut [[u8; 5]; 5]) {
     }
 }
 
-fn course(board_in: &mut [[u8; 5]; 5], x: i32, y: i32) {
+/*
+    fn screen_writer(board_in: &mut [[u8; 5]; 5], x: i32, y: i32, mode: bool)
+
+    Takes screen matrix, accelerometer readings, and current mode and finds the respective pixel to plot to.
+    In both modes there are five value ranges that the x and y values can map to, since we have a 5x5 LED matrix to work with.
+    In course mode that covers a total range of -500 to 500, so to light up the center pixel for example, both x and y must be in the range of -249 to 249.
+    In fine mode the scale is 1/10th that, so -50 to 50, otherwise it works exactly the same.
+
+*/
+fn screen_writer(board_in: &mut [[u8; 5]; 5], x: i32, y: i32, mode: bool) {
     let mut xr = 0;
-    if x <= -500 {
+
+    // Multiplier value, used to scale groupings depending on mode.
+    // mult = 1: Course (normal scale), mult = 10: Fine (1/10 scale)
+    let mut mult = 1;
+
+    if mode {
+        mult = 10;
+    }
+
+    // Plots x value
+    if x <= -500 / mult {
         xr = 4
-    } else if (-499..=-250).contains(&x) {
+    } else if (-499 / mult..=-250 / mult).contains(&x) {
         xr = 3
-    } else if (-249..250).contains(&x) {
+    } else if (-249 / mult..250 / mult).contains(&x) {
         xr = 2
-    } else if (250..500).contains(&x) {
+    } else if (250 / mult..500 / mult).contains(&x) {
         xr = 1
-    } else if x >= 500 {
+    } else if x >= 500 / mult {
         xr = 0
     }
 
+    // Plots y value
     let mut yr = 0;
-    if y <= -500 {
+    if y <= -500 / mult {
         yr = 0
-    } else if (-499..=-250).contains(&y) {
+    } else if (-499 / mult..=-250 / mult).contains(&y) {
         yr = 1
-    } else if (-249..250).contains(&y) {
+    } else if (-249 / mult..250 / mult).contains(&y) {
         yr = 2
-    } else if (250..500).contains(&y) {
+    } else if (250 / mult..500 / mult).contains(&y) {
         yr = 3
-    } else if y >= 500 {
+    } else if y >= 500 / mult {
         yr = 4
     }
-    board_in[yr][xr] = 1;
-}
 
-fn fine(board_in: &mut [[u8; 5]; 5], x: i32, y: i32) {
-    let mut xr = 0;
-    if x <= -50 {
-        xr = 4
-    } else if (-49..=-25).contains(&x) {
-        xr = 3
-    } else if (-24..25).contains(&x) {
-        xr = 2
-    } else if (25..50).contains(&x) {
-        xr = 1
-    } else if x >= 50 {
-        xr = 0
-    }
-
-    let mut yr = 0;
-    if y <= -50 {
-        yr = 0
-    } else if (-49..=-25).contains(&y) {
-        yr = 1
-    } else if (-24..25).contains(&y) {
-        yr = 2
-    } else if (-25..50).contains(&y) {
-        yr = 3
-    } else if y >= 50 {
-        yr = 4
-    }
+    // Sets LED pixel to be displayed this tick, based on above plots.
     board_in[yr][xr] = 1;
 }
